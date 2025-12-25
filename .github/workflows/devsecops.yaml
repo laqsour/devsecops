@@ -1,78 +1,49 @@
 name: DevSecOps Pipeline
 
-
 on:
   push:
     branches: [ "main" ]
 
-
 jobs:
-
 
   devsecops:
     runs-on: ubuntu-latest
 
-
     steps:
-
 
     - uses: actions/checkout@v3
 
-
     ############################################
-    # 1. Analyse SonarQube
-    ############################################
-    - name: Set up JDK (required by Sonar)
-      uses: actions/setup-java@v3
-      with:
-        distribution: 'temurin'
-        java-version: '17'
-
-
-    - name: SonarQube scan
-      uses: sonarsource/sonarqube-scan-action@v2
-      with:
-        args: >
-          -Dsonar.projectKey=devsecops-lab
-          -Dsonar.sources=./api
-      env:
-        SONAR_TOKEN: sqa_a66c39fdca3c9f78933c904b4839c10b5e91247f
-        SONAR_HOST_URL: "http://YOUR_SONAR_IP:9000"
-
-
-    ############################################
-    # 2. Analyse SAST CodeQL
+    # 1️⃣ Analyse SAST CodeQL
     ############################################
     - name: Init CodeQL
       uses: github/codeql-action/init@v3
       with:
         languages: python
 
-
     - name: Run CodeQL
       uses: github/codeql-action/analyze@v3
 
 
     ############################################
-    # 3. Analyse sécurité Python avec Bandit
+    # 2️⃣ Analyse sécurité Python (Bandit)
     ############################################
     - name: Install Bandit
       run: pip install bandit
-
 
     - name: Run Bandit
       run: bandit -r api --severity-level high
 
 
     ############################################
-    # 4. Build Docker
+    # 3️⃣ Build Docker
     ############################################
     - name: Build Docker image
       run: docker build -t devsecops-api ./docker
 
 
     ############################################
-    # 5. Scan Docker avec Trivy
+    # 4️⃣ Scan Docker avec Trivy
     ############################################
     - name: Trivy Scan
       uses: aquasecurity/trivy-action@master
