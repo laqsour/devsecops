@@ -1,65 +1,141 @@
-api/app.py
 from flask import Flask, request
 import sqlite3
 import subprocess
-import hashlib
+import bcrypt
 import os
+from pathlib import Path
+
 app = Flask(__name__)
-SECRET_KEY = "dev-secret-key-12345"   # Hardcoded secret
+
+DATABASE = "users.db"
+SAFE_FILES_DIR = Path("safe_files")   # dossier autorisé
+SAFE_FILES_DIR.mkdir(exist_ok=True)
+
+# =========================================
+# 🔐 Connexion DB
+# =========================================
+def get_db():
+    return sqlite3.connect(DATABASE)
+
+# =========================================
+# 🔐 LOGIN sécurisé (anti-SQL injection)
+# =========================================
 @app.route("/login", methods=["POST"])
 def login():
-    username = request.json.get("username")
-    password = request.json.get("password")
+    data = request.get_json(force=True)
 
+    username = data.get("username")
+    password = data.get("password")
 
-    conn = sqlite3.connect("users.db")
+    if not username or not password:
+        return {"status": "error", "message": "missing credentials"}, 400
+
+    conn = get_db()
     cursor = conn.cursor()
 
+    cursor.execute(
+        "SELECT password FROM users WHERE username = ?",
+        (username,)
+    )
 
-    query = f"SELECT * FROM users WHERE username='{username}' AND password='{password}'"
-    cursor.execute(query)
+    row = cursor.fetchone()
+    conn.close()
 
+    if not row:
+        return {"status": "error", "message": "user not found"}, 401
 
-    result = cursor.fetchone()
-    if result:
+    stored_hash = row[0].encode()
+
+    if bcrypt.checkpw(password.encode(), stored_hash):
         return {"status": "success", "user": username}
-    return {"status": "error", "message": "Invalid credentials"}
+
+    return {"status": "error", "message": "invalid password"}, 401
+
+
+# =========================================
+# 🛡️ Ping sécurisé (pas de shell, host validé)
+# =========================================
+ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
+
 @app.route("/ping", methods=["POST"])
 def ping():
     host = request.json.get("host", "")
-    cmd = f"ping -c 1 {host}"
-    output = subprocess.check_output(cmd, shell=True)
+
+    if host not in ALLOWED_HOSTS:
+        return {"error": "host not allowed"}, 400
+
+    result = subprocess.run(
+        ["ping", "-c", "1", host],
+        capture_output=True,
+        text=True
+    )
+
+    return {"output": result.stdout}
 
 
-    return {"output": output.decode()}
+# =========================================
+# 🧮 Compute → remplacement de eval()
+# =========================================
 @app.route("/compute", methods=["POST"])
 def compute():
-    expression = request.json.get("expression", "1+1")
-    result = eval(expression)   # CRITIQUE
+    expression = request.json.get("expression", "")
+
+    allowed = {"+", "-", "*", "/", "(", ")", ".", "0","1","2","3","4","5","6","7","8","9"}
+
+    if not all(c in allowed for c in expression):
+        return {"error": "invalid expression"}, 400
+
+    try:
+        result = eval(expression, {"__builtins__": {}}, {})
+    except Exception:
+        return {"error": "calculation error"}, 400
+
     return {"result": result}
+
+
+# =========================================
+# 🔐 Hash sécurisé (bcrypt)
+# =========================================
 @app.route("/hash", methods=["POST"])
 def hash_password():
-    pwd = request.json.get("password", "admin")
-    hashed = hashlib.md5(pwd.encode()).hexdigest()
-    return {"md5": hashed}
+    pwd = request.json.get("password", "")
+
+    hashed = bcrypt.hashpw(pwd.encode(), bcrypt.gensalt())
+
+    return {"bcrypt": hashed.decode()}
+
+
+# =========================================
+# 📂 Lecture fichier sécurisée (sandbox)
+# =========================================
 @app.route("/readfile", methods=["POST"])
 def readfile():
-    filename = request.json.get("filename", "test.txt")
-    with open(filename, "r") as f:
-        content = f.read()
+    filename = request.json.get("filename", "")
+
+    file_path = (SAFE_FILES_DIR / filename).resolve()
+
+    if SAFE_FILES_DIR not in file_path.parents:
+        return {"error": "access denied"}, 403
+
+    if not file_path.exists():
+        return {"error": "file not found"}, 404
+
+    with open(file_path, "r") as f:
+        return {"content": f.read()}
 
 
-    return {"content": content}
+# =========================================
+# 🚫 Suppression endpoint debug sensible
+# =========================================
 @app.route("/debug", methods=["GET"])
-def debug():
-    # Renvoie des détails sensibles -> mauvaise pratique
-    return {
-        "debug": True,
-        "secret_key": SECRET_KEY,
-        "environment": dict(os.environ)
-    }
+def debug_blocked():
+    return {"message": "Debug mode disabled"}, 403
+
+
 @app.route("/hello", methods=["GET"])
 def hello():
-    return {"message": "Welcome to the DevSecOps vulnerable API"}
+    return {"message": "Secure DevSecOps API"}
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
