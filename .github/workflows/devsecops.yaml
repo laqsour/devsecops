@@ -6,17 +6,16 @@ on:
   pull_request:
     branches: [ "main" ]
 
+# 🔑 Permissions pour CodeQL
 permissions:
-  contents: read          # pour checkout
-  security-events: read   # 🔑 nécessaire pour CodeQL
+  contents: read
+  security-events: read
 
 jobs:
-
   devsecops:
     runs-on: ubuntu-latest
 
     steps:
-
     # 0️⃣ Checkout du repo
     - name: Checkout repository
       uses: actions/checkout@v3
@@ -31,6 +30,11 @@ jobs:
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v3
+      with:
+        output: results         # dossier où stocker les SARIF
+        upload: always          # force l’upload des résultats
+        upload-database: true
+        wait-for-processing: true
 
     ############################################
     # 2️⃣ Analyse sécurité Python avec Bandit
